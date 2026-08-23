@@ -1,0 +1,41 @@
+[project]
+name = "comfyui-sam-audio"
+version = "0.1.0"
+description = "Native ComfyUI nodes for local Meta SAM-Audio sound separation"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "ComfyUI SAM-Audio contributors" }]
+dependencies = [
+    "einops",
+    "ftfy",
+    "huggingface-hub",
+    "regex",
+    "safetensors",
+    "timm",
+    "torchcodec",
+    "torchdiffeq",
+    "tqdm",
+    "transformers>=4.54.0",
+]
+
+[project.urls]
+Repository = "https://github.com/ethanfel/ComfyUI-SAM-Audio"
+Issues = "https://github.com/ethanfel/ComfyUI-SAM-Audio/issues"
+Upstream = "https://github.com/facebookresearch/sam-audio"
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[tool.comfy]
+PublisherId = "ethanfel"
+DisplayName = "SAM-Audio"
+Icon = ""
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+lint.select = ["B", "E", "F", "I", "W"]
+lint.ignore = ["E501"]

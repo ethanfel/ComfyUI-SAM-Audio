@@ -1,0 +1,110 @@
+{
+  "last_node_id": 6,
+  "last_link_id": 5,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "SAMAudioPipelineLoader",
+      "pos": [60, 100],
+      "size": [340, 82],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {"name": "pipeline", "type": "SAM_AUDIO_PIPELINE", "links": [1], "slot_index": 0}
+      ],
+      "properties": {"Node name for S&R": "SAMAudioPipelineLoader"},
+      "widgets_values": ["facebook/sam-audio-large"]
+    },
+    {
+      "id": 2,
+      "type": "LoadAudio",
+      "pos": [60, 240],
+      "size": [340, 136],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {"name": "AUDIO", "type": "AUDIO", "links": [2], "slot_index": 0}
+      ],
+      "properties": {"cnr_id": "comfy-core", "Node name for S&R": "LoadAudio"},
+      "widgets_values": ["input.wav", null, null]
+    },
+    {
+      "id": 3,
+      "type": "SAMAudioSpanPrompt",
+      "pos": [470, 390],
+      "size": [310, 160],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {"name": "spans", "type": "SAM_AUDIO_SPANS", "links": [3], "slot_index": 0}
+      ],
+      "properties": {"Node name for S&R": "SAMAudioSpanPrompt"},
+      "widgets_values": ["positive", 0.5, 2.0]
+    },
+    {
+      "id": 4,
+      "type": "SAMAudioSpanSeparator",
+      "pos": [500, 100],
+      "size": [370, 250],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {"name": "pipeline", "type": "SAM_AUDIO_PIPELINE", "link": 1},
+        {"name": "audio", "type": "AUDIO", "link": 2},
+        {"name": "spans", "type": "SAM_AUDIO_SPANS", "link": 3}
+      ],
+      "outputs": [
+        {"name": "target", "type": "AUDIO", "links": [4], "slot_index": 0},
+        {"name": "residual", "type": "AUDIO", "links": [5], "slot_index": 1}
+      ],
+      "properties": {"Node name for S&R": "SAMAudioSpanSeparator"},
+      "widgets_values": ["car honking", 0, 32]
+    },
+    {
+      "id": 5,
+      "type": "PreviewAudio",
+      "pos": [960, 90],
+      "size": [300, 90],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [{"name": "audio", "type": "AUDIO", "link": 4}],
+      "outputs": [],
+      "title": "Preview isolated target",
+      "properties": {"cnr_id": "comfy-core", "Node name for S&R": "PreviewAudio"},
+      "widgets_values": []
+    },
+    {
+      "id": 6,
+      "type": "PreviewAudio",
+      "pos": [960, 230],
+      "size": [300, 90],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [{"name": "audio", "type": "AUDIO", "link": 5}],
+      "outputs": [],
+      "title": "Preview residual",
+      "properties": {"cnr_id": "comfy-core", "Node name for S&R": "PreviewAudio"},
+      "widgets_values": []
+    }
+  ],
+  "links": [
+    [1, 1, 0, 4, 0, "SAM_AUDIO_PIPELINE"],
+    [2, 2, 0, 4, 1, "AUDIO"],
+    [3, 3, 0, 4, 2, "SAM_AUDIO_SPANS"],
+    [4, 4, 0, 5, 0, "AUDIO"],
+    [5, 4, 1, 6, 0, "AUDIO"]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {},
+  "version": 0.4
+}

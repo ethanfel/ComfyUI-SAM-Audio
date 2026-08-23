@@ -1,0 +1,12 @@
+# Runtime-only dependencies. Meta's source packages are installed with --no-deps
+# by install.py so their training stacks cannot alter ComfyUI's core packages.
+einops
+ftfy
+huggingface-hub
+regex
+safetensors
+timm
+torchcodec
+torchdiffeq
+tqdm
+transformers>=4.54.0

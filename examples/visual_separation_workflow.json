@@ -1,0 +1,113 @@
+{
+  "last_node_id": 6,
+  "last_link_id": 6,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "SAMAudioPipelineLoader",
+      "pos": [50, 80],
+      "size": [350, 82],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {"name": "pipeline", "type": "SAM_AUDIO_PIPELINE", "links": [1], "slot_index": 0}
+      ],
+      "properties": {"Node name for S&R": "SAMAudioPipelineLoader"},
+      "widgets_values": ["facebook/sam-audio-large-tv"]
+    },
+    {
+      "id": 2,
+      "type": "LoadImage",
+      "pos": [50, 210],
+      "size": [350, 330],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {"name": "IMAGE", "type": "IMAGE", "links": [3], "slot_index": 0},
+        {"name": "MASK", "type": "MASK", "links": [4], "slot_index": 1}
+      ],
+      "properties": {"cnr_id": "comfy-core", "Node name for S&R": "LoadImage"},
+      "widgets_values": ["masked_object.png", "image"]
+    },
+    {
+      "id": 3,
+      "type": "LoadAudio",
+      "pos": [50, 600],
+      "size": [350, 136],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {"name": "AUDIO", "type": "AUDIO", "links": [2], "slot_index": 0}
+      ],
+      "properties": {"cnr_id": "comfy-core", "Node name for S&R": "LoadAudio"},
+      "widgets_values": ["input.wav", null, null]
+    },
+    {
+      "id": 4,
+      "type": "SAMAudioVisualSeparator",
+      "pos": [520, 170],
+      "size": [390, 310],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {"name": "pipeline", "type": "SAM_AUDIO_PIPELINE", "link": 1},
+        {"name": "audio", "type": "AUDIO", "link": 2},
+        {"name": "images", "type": "IMAGE", "link": 3},
+        {"name": "mask", "type": "MASK", "link": 4}
+      ],
+      "outputs": [
+        {"name": "target", "type": "AUDIO", "links": [5], "slot_index": 0},
+        {"name": "residual", "type": "AUDIO", "links": [6], "slot_index": 1}
+      ],
+      "properties": {"Node name for S&R": "SAMAudioVisualSeparator"},
+      "widgets_values": ["", 0, 32]
+    },
+    {
+      "id": 5,
+      "type": "PreviewAudio",
+      "pos": [1000, 150],
+      "size": [300, 90],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [{"name": "audio", "type": "AUDIO", "link": 5}],
+      "outputs": [],
+      "title": "Preview isolated target",
+      "properties": {"cnr_id": "comfy-core", "Node name for S&R": "PreviewAudio"},
+      "widgets_values": []
+    },
+    {
+      "id": 6,
+      "type": "PreviewAudio",
+      "pos": [1000, 300],
+      "size": [300, 90],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [{"name": "audio", "type": "AUDIO", "link": 6}],
+      "outputs": [],
+      "title": "Preview residual",
+      "properties": {"cnr_id": "comfy-core", "Node name for S&R": "PreviewAudio"},
+      "widgets_values": []
+    }
+  ],
+  "links": [
+    [1, 1, 0, 4, 0, "SAM_AUDIO_PIPELINE"],
+    [2, 3, 0, 4, 1, "AUDIO"],
+    [3, 2, 0, 4, 2, "IMAGE"],
+    [4, 2, 1, 4, 3, "MASK"],
+    [5, 4, 0, 5, 0, "AUDIO"],
+    [6, 4, 1, 6, 0, "AUDIO"]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {},
+  "version": 0.4
+}
