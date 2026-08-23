@@ -374,7 +374,9 @@ def _cached_support_snapshot(spec: SupportModelSpec) -> str:
 def _sam_audio_model_kwargs(model_path: Path) -> dict[str, Any]:
     model_kwargs: dict[str, Any] = {
         "map_location": "cpu",
-        "strict": False,
+        # Upstream's override only calls torch.nn.Module.load_state_dict when this
+        # is true. Passing false silently leaves the complete model uninitialized.
+        "strict": True,
         "text_ranker": None,
         "visual_ranker": None,
     }

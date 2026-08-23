@@ -164,9 +164,32 @@ def test_local_checkpoint_falls_back_for_legacy_hub_signature(tmp_path):
     assert calls[1][1]["local_files_only"] is True
     assert calls[1][1]["proxies"] is None
     assert calls[1][1]["resume_download"] is False
-    assert calls[1][1]["strict"] is False
+    assert calls[1][1]["strict"] is True
     assert calls[1][1]["text_ranker"] is None
     assert calls[1][1]["visual_ranker"] is None
+
+
+def test_checkpoint_loader_uses_upstream_weight_loading_path(tmp_path):
+    class UpstreamStyleModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.zeros(1))
+
+        def load_state_dict(self, state_dict, strict=True):
+            # SAM-Audio's pinned implementation has no false branch.
+            if strict:
+                return super().load_state_dict(state_dict, strict=False)
+            return None
+
+        @classmethod
+        def from_pretrained(cls, model_id, **kwargs):
+            model = cls()
+            model.load_state_dict({"weight": torch.ones(1)}, strict=kwargs["strict"])
+            return model
+
+    model = runtime._load_sam_audio_checkpoint(UpstreamStyleModel, tmp_path)
+
+    assert torch.equal(model.weight, torch.ones(1))
 
 
 def test_support_snapshot_uses_local_cache_without_network(monkeypatch):
@@ -230,6 +253,7 @@ def test_model_kwargs_replace_support_ids_with_local_snapshots(tmp_path, monkeyp
     assert kwargs["span_predictor"] == "/cache/facebook--pe-a-frame-large"
     assert kwargs["text_ranker"] is None
     assert kwargs["visual_ranker"] is None
+    assert kwargs["strict"] is True
 
 
 def test_local_checkpoint_does_not_hide_unrelated_type_errors(tmp_path):
