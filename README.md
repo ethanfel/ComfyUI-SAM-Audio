@@ -39,9 +39,9 @@ You can authenticate in the ComfyUI environment if you prefer the official repos
 hf auth login
 ```
 
-Models download on first use to `ComfyUI/models/sam_audio/`. Both official and mirrored checkpoints remain subject to Meta's SAM License.
+Models download on first use to the active ComfyUI models directory under `models/sam_audio/`. For example, when ComfyUI is started with `--models-directory /path/to/models`, SAM-Audio checkpoints are stored in `/path/to/models/sam_audio/`. Both official and mirrored checkpoints remain subject to Meta's SAM License.
 
-The required T5 and PE span-predictor assets are pinned in the Hugging Face cache and reused locally after their first download.
+The required T5 asset is pinned in the Hugging Face cache and reused locally after its first download. The separate 5.8 GiB PE span predictor is loaded only when `predict_spans` is enabled.
 
 ## Nodes
 
@@ -71,6 +71,7 @@ Example workflows are included in the [`examples`](examples/) directory.
 - White pixels in a visual mask identify the target object.
 - Local model folders must contain `config.json` and `checkpoint.pt`.
 - The model loader offers PyTorch SDPA (default) or Comfy Kitchen INT8 attention. Comfy Kitchen requires a supported current ComfyUI build and GPU and may slightly change results because its attention is quantized.
+- ComfyUI's **Unload Models** action moves SAM-Audio out of VRAM but keeps the cached loader output in system RAM. Use **Unload Models and Execution Cache** when you also want ComfyUI to discard that cached CPU model.
 
 ## License
 

@@ -148,6 +148,9 @@ def _run_separation(
     if spans is not None:
         validate_spans(spans, duration)
 
+    if predict_spans:
+        pipeline.ensure_span_predictor(model_management)
+
     masked_video = None
     if visual_prompt is not None:
         frames, mask = visual_prompt

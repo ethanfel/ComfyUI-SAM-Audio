@@ -1,4 +1,5 @@
 import hashlib
+import types
 from pathlib import Path
 
 import pytest
@@ -233,7 +234,7 @@ def test_support_snapshot_downloads_only_when_cache_is_absent(monkeypatch):
     assert [call.get("local_files_only", False) for call in calls] == [True, False]
 
 
-def test_model_kwargs_replace_support_ids_with_local_snapshots(tmp_path, monkeypatch):
+def test_model_kwargs_resolve_t5_but_defer_span_predictor(tmp_path, monkeypatch):
     (tmp_path / "config.json").write_text(
         '{"text_encoder":{"name":"t5-base","dim":768},'
         '"span_predictor":"pe-a-frame-large"}'
@@ -250,10 +251,47 @@ def test_model_kwargs_replace_support_ids_with_local_snapshots(tmp_path, monkeyp
         "name": "/cache/t5-base",
         "dim": 768,
     }
-    assert kwargs["span_predictor"] == "/cache/facebook--pe-a-frame-large"
+    assert kwargs["span_predictor"] is None
+    assert runtime._configured_span_predictor(tmp_path) == "pe-a-frame-large"
     assert kwargs["text_ranker"] is None
     assert kwargs["visual_ranker"] is None
     assert kwargs["strict"] is True
+
+
+def test_pipeline_attaches_span_predictor_lazily(monkeypatch):
+    predictor = torch.nn.Linear(2, 2)
+    transform = object()
+    loads = []
+    unloads = []
+    monkeypatch.setattr(
+        runtime,
+        "_load_span_predictor_assets",
+        lambda source: loads.append(source) or (predictor, transform),
+    )
+    management = types.SimpleNamespace(
+        unload_model_and_clones=lambda patcher, all_devices=False: unloads.append(
+            (patcher, all_devices)
+        )
+    )
+    patcher = types.SimpleNamespace(size=123)
+    model = torch.nn.Linear(2, 2)
+    pipeline = runtime.SAMAudioPipeline(
+        model=model,
+        processor=object(),
+        patcher=patcher,
+        device=torch.device("cpu"),
+        source="fake",
+        span_predictor_source="pe-a-frame-large",
+    )
+
+    pipeline.ensure_span_predictor(management)
+    pipeline.ensure_span_predictor(management)
+
+    assert loads == ["pe-a-frame-large"]
+    assert unloads == [(patcher, True)]
+    assert model.span_predictor is predictor
+    assert model.span_predictor_transform is transform
+    assert patcher.size == 0
 
 
 def test_local_checkpoint_does_not_hide_unrelated_type_errors(tmp_path):

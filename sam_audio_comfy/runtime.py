@@ -6,6 +6,7 @@ import importlib
 import json
 import logging
 import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator, Literal, NamedTuple
@@ -118,14 +119,50 @@ class SAMAudioPipeline:
     device: torch.device
     source: str
     attention_backend: str = "pytorch"
+    span_predictor_source: str | None = None
 
     def get_models(self) -> list[Any]:
         """Let ComfyUI track this model for the lifetime of the prompt."""
         return [self.patcher]
 
     def load(self, model_management: Any) -> None:
+        started = time.perf_counter()
         model_management.load_models_gpu([self.patcher], force_full_load=True)
         self.model.eval()
+        elapsed = time.perf_counter() - started
+        if elapsed >= 1.0:
+            LOGGER.info("Loaded SAM-Audio weights onto %s in %.1f seconds", self.device, elapsed)
+
+    def ensure_span_predictor(self, model_management: Any) -> None:
+        """Attach the optional PE span predictor only when it is requested."""
+        if hasattr(self.model, "span_predictor"):
+            return
+        if self.span_predictor_source is None:
+            raise RuntimeError(
+                "This SAM-Audio checkpoint does not declare a span predictor"
+            )
+
+        # If the core model was already used, move it off the GPU before adding a
+        # new submodule. This also makes ComfyUI recalculate the patcher's size.
+        unload = getattr(model_management, "unload_model_and_clones", None)
+        if unload is not None:
+            try:
+                unload(self.patcher, all_devices=True)
+            except TypeError:
+                unload(self.patcher)
+
+        started = time.perf_counter()
+        predictor, transform = _load_span_predictor_assets(
+            self.span_predictor_source
+        )
+        self.model.span_predictor = predictor.eval().to("cpu")
+        self.model.span_predictor_transform = transform
+        if hasattr(self.patcher, "size"):
+            self.patcher.size = 0
+        LOGGER.info(
+            "Loaded optional SAM-Audio span predictor in %.1f seconds",
+            time.perf_counter() - started,
+        )
 
 
 def register_model_folder(folder_paths: Any) -> Path:
@@ -391,11 +428,36 @@ def _sam_audio_model_kwargs(model_path: Path) -> dict[str, Any]:
         text_encoder["name"] = _cached_support_snapshot(SUPPORT_MODELS["t5-base"])
         model_kwargs["text_encoder"] = text_encoder
 
-    if config.get("span_predictor") == "pe-a-frame-large":
-        model_kwargs["span_predictor"] = _cached_support_snapshot(
-            SUPPORT_MODELS["pe-a-frame-large"]
-        )
+    # The PE span predictor is a separate 5.8 GiB model and is not required for
+    # ordinary text, explicit-span, or visual separation. It is attached lazily
+    # by SAMAudioPipeline.ensure_span_predictor when predict_spans is enabled.
+    if config.get("span_predictor") is not None:
+        model_kwargs["span_predictor"] = None
     return model_kwargs
+
+
+def _configured_span_predictor(model_path: Path) -> str | None:
+    config_path = model_path / "config.json"
+    if not config_path.is_file():
+        return None
+    value = json.loads(config_path.read_text(encoding="utf-8")).get(
+        "span_predictor"
+    )
+    return value if isinstance(value, str) and value else None
+
+
+def _load_span_predictor_assets(source: str) -> tuple[torch.nn.Module, Any]:
+    if source == "pe-a-frame-large":
+        source = _cached_support_snapshot(SUPPORT_MODELS["pe-a-frame-large"])
+    try:
+        module = importlib.import_module("core.audio_visual_encoder")
+        predictor = module.PEAudioFrame.from_config(source, pretrained=True)
+        transform = module.PEAudioFrameTransform.from_config(source)
+    except Exception as error:
+        raise RuntimeError(
+            f"Failed to load SAM-Audio's optional span predictor from {source}"
+        ) from error
+    return predictor, transform
 
 
 def _load_sam_audio_checkpoint(SAMAudio: Any, model_path: Path) -> Any:
@@ -442,8 +504,13 @@ def load_pipeline(
     SAMAudio, SAMAudioProcessor = import_sam_audio()
 
     LOGGER.info("Loading SAM-Audio model from %s", model_path)
+    started = time.perf_counter()
     try:
         model = _load_sam_audio_checkpoint(SAMAudio, model_path)
+        LOGGER.info(
+            "Loaded SAM-Audio checkpoint and required text encoder on CPU in %.1f seconds",
+            time.perf_counter() - started,
+        )
         processor = SAMAudioProcessor.from_pretrained(str(model_path))
     except Exception as error:
         raise RuntimeError(
@@ -467,6 +534,7 @@ def load_pipeline(
         device=load_device,
         source=model_name,
         attention_backend=attention_backend,
+        span_predictor_source=_configured_span_predictor(model_path),
     )
 
 

@@ -11,7 +11,10 @@ def _load_node_package(monkeypatch, tmp_path):
     comfy = types.ModuleType("comfy")
     comfy.__path__ = []
     management = types.ModuleType("comfy.model_management")
-    management.load_models_gpu = lambda models, force_full_load=False: None
+    management.load_calls = []
+    management.load_models_gpu = lambda models, force_full_load=False: (
+        management.load_calls.append((models, force_full_load))
+    )
     patcher = types.ModuleType("comfy.model_patcher")
     utils = types.ModuleType("comfy.utils")
     utils.ProgressBar = lambda total: types.SimpleNamespace(update=lambda value: None)
@@ -125,7 +128,7 @@ def test_text_node_runs_full_audio_batch_with_standard_shapes(monkeypatch, tmp_p
         "SAMAudioSpanSeparator",
         "SAMAudioVisualSeparator",
     }
-    assert management.load_models_gpu is not None
+    assert management.load_calls == [([pipeline.patcher], True)]
 
 
 def _fake_pipeline(runtime, processor=None):
