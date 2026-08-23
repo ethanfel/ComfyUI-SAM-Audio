@@ -15,7 +15,7 @@
         {"name": "pipeline", "type": "SAM_AUDIO_PIPELINE", "links": [1], "slot_index": 0}
       ],
       "properties": {"Node name for S&R": "SAMAudioPipelineLoader"},
-      "widgets_values": ["facebook/sam-audio-large-tv"]
+      "widgets_values": ["facebook/sam-audio-large-tv", "pytorch"]
     },
     {
       "id": 2,

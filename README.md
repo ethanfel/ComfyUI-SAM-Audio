@@ -63,6 +63,7 @@ Example workflows are included in the [`examples`](examples/) directory.
 - Output is mono at 48 kHz.
 - White pixels in a visual mask identify the target object.
 - Local model folders must contain `config.json` and `checkpoint.pt`.
+- The model loader offers PyTorch SDPA (default) or Comfy Kitchen INT8 attention. Comfy Kitchen requires a supported current ComfyUI build and GPU and may slightly change results because its attention is quantized.
 
 ## License
 

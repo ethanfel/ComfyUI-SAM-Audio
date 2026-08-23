@@ -11,6 +11,7 @@ from typing import Any, Iterator, Literal, NamedTuple
 
 import torch
 
+from .attention import validate_attention_backend
 from .audiotools_compat import audiotools_import_compatibility
 from .xformers_compat import xformers_import_compatibility
 
@@ -93,6 +94,7 @@ class SAMAudioPipeline:
     patcher: Any
     device: torch.device
     source: str
+    attention_backend: str = "pytorch"
 
     def get_models(self) -> list[Any]:
         """Let ComfyUI track this model for the lifetime of the prompt."""
@@ -319,7 +321,10 @@ def load_pipeline(
     folder_paths: Any,
     model_management: Any,
     model_patcher: Any,
+    attention_backend: str = "pytorch",
 ) -> SAMAudioPipeline:
+    load_device = model_management.get_torch_device()
+    validate_attention_backend(attention_backend, load_device)
     model_path = resolve_model(model_name, folder_paths)
     SAMAudio, SAMAudioProcessor = import_sam_audio()
 
@@ -344,7 +349,6 @@ def load_pipeline(
     # residency through a mutable model.device attribute. Upstream does not call
     # that helper internally, so adopting ComfyUI's convention is safe here.
     model.device = torch.device("cpu")
-    load_device = model_management.get_torch_device()
     offload_device = model_management.unet_offload_device()
     patcher = model_patcher.ModelPatcher(
         model, load_device=load_device, offload_device=offload_device
@@ -355,6 +359,7 @@ def load_pipeline(
         patcher=patcher,
         device=load_device,
         source=model_name,
+        attention_backend=attention_backend,
     )
 
 

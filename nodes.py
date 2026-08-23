@@ -8,6 +8,7 @@ import comfy.model_patcher as model_patcher
 import folder_paths
 import torch
 
+from .sam_audio_comfy.attention import ATTENTION_BACKENDS, attention_backend_context
 from .sam_audio_comfy.audio import (
     prepare_audio,
     prepare_visual_prompt,
@@ -109,7 +110,11 @@ def _run_separation(
     pipeline.load(model_management)
     batch = batch.to(pipeline.device)
 
-    with seeded_inference(seed, pipeline.device), torch.inference_mode():
+    with (
+        seeded_inference(seed, pipeline.device),
+        attention_backend_context(pipeline.attention_backend),
+        torch.inference_mode(),
+    ):
         result = pipeline.model.separate(
             batch,
             ode_opt=sampling_options,
@@ -148,7 +153,14 @@ class SAMAudioPipelineLoader:
                         "default": "facebook/sam-audio-large",
                         "tooltip": "Models download into models/sam_audio; valid local model folders appear automatically.",
                     },
-                )
+                ),
+                "attention_backend": (
+                    list(ATTENTION_BACKENDS),
+                    {
+                        "default": "pytorch",
+                        "tooltip": "PyTorch SDPA is the accurate default. Comfy Kitchen uses its quantized INT8 attention kernel when supported.",
+                    },
+                ),
             }
         }
 
@@ -157,13 +169,14 @@ class SAMAudioPipelineLoader:
     FUNCTION = "load_model"
     CATEGORY = CATEGORY
 
-    def load_model(self, model_name: str):
+    def load_model(self, model_name: str, attention_backend: str = "pytorch"):
         return (
             load_pipeline(
                 model_name,
                 folder_paths,
                 model_management,
                 model_patcher,
+                attention_backend,
             ),
         )
 

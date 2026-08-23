@@ -93,6 +93,10 @@ def test_text_node_runs_full_audio_batch_with_standard_shapes(monkeypatch, tmp_p
     assert target["waveform"].shape == (2, 1, 8)
     assert residual["waveform"].shape == (2, 1, 8)
     assert target["sample_rate"] == 8
+    loader_inputs = package.NODE_CLASS_MAPPINGS[
+        "SAMAudioPipelineLoader"
+    ].INPUT_TYPES()["required"]
+    assert loader_inputs["attention_backend"][0] == ["pytorch", "comfy_kitchen"]
     assert set(package.NODE_CLASS_MAPPINGS) == {
         "SAMAudioPipelineLoader",
         "SAMAudioSpanPrompt",
