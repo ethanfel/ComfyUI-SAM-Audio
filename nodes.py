@@ -132,9 +132,9 @@ def _run_separation(
 
 class SAMAudioPipelineLoader:
     DESCRIPTION = (
-        "Loads an official gated SAM-Audio checkpoint or a local model from "
-        "ComfyUI/models/sam_audio. The first official-model load downloads config.json "
-        "and checkpoint.pt after Hugging Face access has been granted."
+        "Loads an official SAM-Audio checkpoint or a local model from "
+        "ComfyUI/models/sam_audio. If Hugging Face denies gated access, the loader "
+        "uses a pinned, checksum-verified public mirror of the same checkpoint."
     )
 
     @classmethod
@@ -146,7 +146,7 @@ class SAMAudioPipelineLoader:
                     choices,
                     {
                         "default": "facebook/sam-audio-large",
-                        "tooltip": "Official models download into models/sam_audio; valid local model folders appear automatically.",
+                        "tooltip": "Models download into models/sam_audio; valid local model folders appear automatically.",
                     },
                 )
             }

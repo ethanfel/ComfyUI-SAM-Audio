@@ -8,7 +8,7 @@ Supports text prompts, positive and negative time spans, and visual masks. Each 
 
 - Python 3.11 or newer
 - A CUDA GPU is strongly recommended
-- Access to a gated SAM-Audio checkpoint on Hugging Face
+- An internet connection for the first model download
 
 ## Installation
 
@@ -27,15 +27,17 @@ python ComfyUI-SAM-Audio/install.py
 
 Then restart ComfyUI. If installed through ComfyUI Manager, the installer should run automatically.
 
-## Model access
+## Model download
 
-Accept the license for the checkpoint you want to use, such as [facebook/sam-audio-large](https://huggingface.co/facebook/sam-audio-large), then authenticate in the ComfyUI environment:
+Select a model in **SAM-Audio Model Loader** and queue the workflow. The loader first tries Meta's official repository. If Hugging Face denies gated access, it automatically downloads the matching pinned and checksum-verified checkpoint from the [public mirror collection](https://huggingface.co/collections/mrfakename/sam-audio).
+
+You can authenticate in the ComfyUI environment if you prefer the official repository:
 
 ```bash
 hf auth login
 ```
 
-Official checkpoints download on first use to `ComfyUI/models/sam_audio/`.
+Models download on first use to `ComfyUI/models/sam_audio/`. Both official and mirrored checkpoints remain subject to Meta's SAM License.
 
 ## Nodes
 

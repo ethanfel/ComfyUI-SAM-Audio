@@ -1,8 +1,10 @@
+import hashlib
 from pathlib import Path
 
 import pytest
 import torch
 
+from sam_audio_comfy import runtime
 from sam_audio_comfy.runtime import (
     SpanPrompt,
     discover_local_models,
@@ -49,6 +51,94 @@ def test_official_download_directories_are_not_duplicated_as_local(tmp_path):
     _make_model(model_root / "sam-audio-large")
 
     assert discover_local_models(folders) == {}
+
+
+def test_gated_download_uses_pinned_verified_mirror(tmp_path, monkeypatch):
+    class GatedRepoError(Exception):
+        pass
+
+    checkpoint = b"verified mirror checkpoint"
+    spec = runtime.MirrorSpec(
+        repo_id="mirror/sam-audio-small",
+        revision="pinned-revision",
+        checkpoint_size=len(checkpoint),
+        checkpoint_sha256=hashlib.sha256(checkpoint).hexdigest(),
+    )
+    monkeypatch.setitem(runtime.MIRROR_MODELS, "facebook/sam-audio-small", spec)
+    calls = []
+
+    class FakeHub:
+        @staticmethod
+        def snapshot_download(**kwargs):
+            calls.append(kwargs)
+            if kwargs["repo_id"] == "facebook/sam-audio-small":
+                raise GatedRepoError("access denied")
+            destination = Path(kwargs["local_dir"])
+            (destination / "config.json").write_text("{}")
+            (destination / "checkpoint.pt").write_bytes(checkpoint)
+            (destination / "LICENSE").write_text("SAM License")
+            return str(destination)
+
+    monkeypatch.setattr(runtime.importlib, "import_module", lambda _: FakeHub)
+    result = runtime._download_official_model(
+        "facebook/sam-audio-small", tmp_path
+    )
+
+    assert result == tmp_path / "sam-audio-small"
+    assert calls[1]["repo_id"] == spec.repo_id
+    assert calls[1]["revision"] == spec.revision
+    assert calls[1]["allow_patterns"] == [
+        "config.json",
+        "checkpoint.pt",
+        "LICENSE",
+    ]
+    assert (result / runtime.MIRROR_MARKER).read_text() == (
+        f"{len(checkpoint)} {spec.checkpoint_sha256}\n"
+    )
+
+
+def test_non_gate_download_error_does_not_use_mirror(tmp_path, monkeypatch):
+    calls = []
+
+    class FakeHub:
+        @staticmethod
+        def snapshot_download(**kwargs):
+            calls.append(kwargs)
+            raise ConnectionError("offline")
+
+    monkeypatch.setattr(runtime.importlib, "import_module", lambda _: FakeHub)
+    with pytest.raises(RuntimeError, match="Could not download"):
+        runtime._download_official_model("facebook/sam-audio-small", tmp_path)
+
+    assert [call["repo_id"] for call in calls] == ["facebook/sam-audio-small"]
+
+
+def test_mirror_checksum_mismatch_is_rejected(tmp_path, monkeypatch):
+    class GatedRepoError(Exception):
+        pass
+
+    spec = runtime.MirrorSpec(
+        repo_id="mirror/sam-audio-small",
+        revision="pinned-revision",
+        checkpoint_size=3,
+        checkpoint_sha256=hashlib.sha256(b"good").hexdigest(),
+    )
+    monkeypatch.setitem(runtime.MIRROR_MODELS, "facebook/sam-audio-small", spec)
+
+    class FakeHub:
+        @staticmethod
+        def snapshot_download(**kwargs):
+            if kwargs["repo_id"] == "facebook/sam-audio-small":
+                raise GatedRepoError("access denied")
+            destination = Path(kwargs["local_dir"])
+            (destination / "config.json").write_text("{}")
+            (destination / "checkpoint.pt").write_bytes(b"bad")
+            (destination / "LICENSE").write_text("SAM License")
+            return str(destination)
+
+    monkeypatch.setattr(runtime.importlib, "import_module", lambda _: FakeHub)
+    with pytest.raises(RuntimeError, match="verified public mirror"):
+        runtime._download_official_model("facebook/sam-audio-small", tmp_path)
 
 
 def test_ode_options_match_upstream_default():

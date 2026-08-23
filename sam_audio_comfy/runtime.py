@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import importlib
 import logging
 import os
@@ -26,6 +27,57 @@ OFFICIAL_MODELS = (
 
 MODEL_FOLDER = "sam_audio"
 MODEL_FILES = ("config.json", "checkpoint.pt")
+MIRROR_MARKER = ".verified-mirror-checkpoint"
+
+
+@dataclass(frozen=True)
+class MirrorSpec:
+    repo_id: str
+    revision: str
+    checkpoint_size: int
+    checkpoint_sha256: str
+
+
+# Each mirror revision is immutable, includes Meta's SAM License, and was checked
+# against the corresponding facebook checkpoint.pt LFS SHA-256 on 2026-08-23.
+MIRROR_MODELS = {
+    "facebook/sam-audio-small": MirrorSpec(
+        "mrfakename/sam-audio-small",
+        "682824171fd5cfec47b88687f583a11050c1bf1d",
+        5_100_547_943,
+        "8c44fda9821fd9f2ec8977304e3c0f55290d9eacb6bbf25b4b8fb1f69c2a8c06",
+    ),
+    "facebook/sam-audio-base": MirrorSpec(
+        "mrfakename/sam-audio-base",
+        "351f6666d46357edea2149a338a680fcd0d7afdd",
+        7_725_405_659,
+        "b5f3e29ea7a9e80e90a00da495a8aafe890571f371c4bfb88c052c65a5636839",
+    ),
+    "facebook/sam-audio-large": MirrorSpec(
+        "mrfakename/sam-audio-large",
+        "497809f191dd4f673a2c93557176387cf2a06cf2",
+        14_861_356_211,
+        "ca55418b1d23e8c8a4dcc55f259d9801c8f79da0131a66e525d862c1289e3c4f",
+    ),
+    "facebook/sam-audio-small-tv": MirrorSpec(
+        "mrfakename/sam-audio-small-tv",
+        "2fee00b2836ede05fce503726ac9f908b1fc4aa9",
+        5_100_547_943,
+        "1a9693b235efc3176986664dac349eb64022c7468cf8d4195954490a2457e6a9",
+    ),
+    "facebook/sam-audio-base-tv": MirrorSpec(
+        "mrfakename/sam-audio-base-tv",
+        "ed6a64b2d3c6151276d81783becb8881d75efe4f",
+        7_725_405_659,
+        "569e3fecdefe267047b02d117acb5a67c03d2f73c4943d3d8bd43df9e9b9148d",
+    ),
+    "facebook/sam-audio-large-tv": MirrorSpec(
+        "mrfakename/sam-audio-large-tv",
+        "30eea7c915f43349f3b3f5c7e33e8658a01d7253",
+        14_861_356_211,
+        "90e047269238c498c5abe0da6e6ba40859d152111d4a09f582a209027a33b72f",
+    ),
+}
 
 
 class SpanPrompt(NamedTuple):
@@ -105,25 +157,123 @@ def model_choices(folder_paths: Any) -> list[str]:
     return [*OFFICIAL_MODELS, *discover_local_models(folder_paths).keys()]
 
 
+def _is_gate_error(error: Exception) -> bool:
+    """Recognize Hugging Face gated/authorization failures across hub versions."""
+    current: BaseException | None = error
+    visited: set[int] = set()
+    while current is not None and id(current) not in visited:
+        visited.add(id(current))
+        if type(current).__name__ == "GatedRepoError":
+            return True
+        response = getattr(current, "response", None)
+        if getattr(response, "status_code", None) in (401, 403):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+def _checkpoint_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as checkpoint:
+        for chunk in iter(lambda: checkpoint.read(8 * 1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _verify_mirror_checkpoint(destination: Path, spec: MirrorSpec) -> None:
+    checkpoint = destination / "checkpoint.pt"
+    marker = destination / MIRROR_MARKER
+    expected_marker = f"{spec.checkpoint_size} {spec.checkpoint_sha256}\n"
+
+    if (
+        marker.is_file()
+        and marker.read_text(encoding="utf-8") == expected_marker
+        and checkpoint.stat().st_size == spec.checkpoint_size
+    ):
+        return
+
+    actual_size = checkpoint.stat().st_size
+    if actual_size != spec.checkpoint_size:
+        raise RuntimeError(
+            f"Mirror checkpoint size mismatch for {spec.repo_id}: expected "
+            f"{spec.checkpoint_size} bytes, received {actual_size}"
+        )
+
+    actual_hash = _checkpoint_sha256(checkpoint)
+    if actual_hash != spec.checkpoint_sha256:
+        raise RuntimeError(
+            f"Mirror checkpoint checksum mismatch for {spec.repo_id}; refusing to load it"
+        )
+    marker.write_text(expected_marker, encoding="utf-8")
+
+
+def _download_mirror_model(
+    huggingface_hub: Any,
+    destination: Path,
+    spec: MirrorSpec,
+) -> Path:
+    marker = destination / MIRROR_MARKER
+    marker.write_text(f"pending {spec.checkpoint_sha256}\n", encoding="utf-8")
+    snapshot = huggingface_hub.snapshot_download(
+        repo_id=spec.repo_id,
+        revision=spec.revision,
+        local_dir=str(destination),
+        allow_patterns=[*MODEL_FILES, "LICENSE"],
+    )
+    path = Path(snapshot)
+    if not _is_model_directory(path) or not (path / "LICENSE").is_file():
+        raise RuntimeError(
+            f"The mirror snapshot for {spec.repo_id} is incomplete; expected "
+            "config.json, checkpoint.pt, and LICENSE"
+        )
+    _verify_mirror_checkpoint(path, spec)
+    return path
+
+
 def _download_official_model(repo_id: str, model_root: Path) -> Path:
     destination = model_root / repo_id.rsplit("/", 1)[-1]
     if _is_model_directory(destination):
-        return destination
+        marker = destination / MIRROR_MARKER
+        if marker.exists() and (destination / "LICENSE").is_file():
+            _verify_mirror_checkpoint(destination, MIRROR_MODELS[repo_id])
+            return destination
+        if not marker.exists():
+            return destination
 
     destination.mkdir(parents=True, exist_ok=True)
     try:
         huggingface_hub = importlib.import_module("huggingface_hub")
+    except Exception as error:
+        raise RuntimeError(
+            "huggingface-hub is required to download SAM-Audio checkpoints; "
+            "run this node's install.py and restart ComfyUI"
+        ) from error
+
+    try:
         snapshot = huggingface_hub.snapshot_download(
             repo_id=repo_id,
             local_dir=str(destination),
             allow_patterns=list(MODEL_FILES),
         )
     except Exception as error:
+        if _is_gate_error(error):
+            spec = MIRROR_MODELS[repo_id]
+            LOGGER.warning(
+                "Access to %s was gated; downloading checksum-verified mirror %s",
+                repo_id,
+                spec.repo_id,
+            )
+            try:
+                return _download_mirror_model(huggingface_hub, destination, spec)
+            except Exception as mirror_error:
+                raise RuntimeError(
+                    f"Access to {repo_id} was denied and its verified public mirror "
+                    f"{spec.repo_id} could not be downloaded"
+                ) from mirror_error
         raise RuntimeError(
             f"Could not download {repo_id}. Accept the model license at "
             f"https://huggingface.co/{repo_id}, run `hf auth login` in ComfyUI's "
-            "Python environment, and retry. The Hugging Face token is deliberately "
-            "not stored in a workflow."
+            "Python environment, and retry."
         ) from error
 
     path = Path(snapshot)
@@ -132,6 +282,7 @@ def _download_official_model(repo_id: str, model_root: Path) -> Path:
             f"The downloaded snapshot for {repo_id} is incomplete; expected "
             f"{', '.join(MODEL_FILES)} in {path}"
         )
+    (path / MIRROR_MARKER).unlink(missing_ok=True)
     return path
 
 
