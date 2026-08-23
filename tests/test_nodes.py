@@ -97,6 +97,10 @@ def test_text_node_runs_full_audio_batch_with_standard_shapes(monkeypatch, tmp_p
         "SAMAudioPipelineLoader"
     ].INPUT_TYPES()["required"]
     assert loader_inputs["attention_backend"][0] == ["pytorch", "comfy_kitchen"]
+    sampler_inputs = package.NODE_CLASS_MAPPINGS[
+        "SAMAudioTextSeparator"
+    ].INPUT_TYPES()["required"]
+    assert sampler_inputs["seed"][1]["control_after_generate"] is True
     assert set(package.NODE_CLASS_MAPPINGS) == {
         "SAMAudioPipelineLoader",
         "SAMAudioSpanPrompt",

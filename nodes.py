@@ -41,6 +41,7 @@ def _sampling_inputs() -> dict[str, tuple[Any, ...]]:
                 "default": 0,
                 "min": 0,
                 "max": MAX_SEED,
+                "control_after_generate": True,
                 "tooltip": "Controls SAM-Audio's initial noise for reproducible separation.",
             },
         ),

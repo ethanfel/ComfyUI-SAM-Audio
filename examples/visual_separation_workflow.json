@@ -67,7 +67,7 @@
         {"name": "residual", "type": "AUDIO", "links": [6], "slot_index": 1}
       ],
       "properties": {"Node name for S&R": "SAMAudioVisualSeparator"},
-      "widgets_values": ["", 0, 32]
+      "widgets_values": ["", 0, "fixed", 32]
     },
     {
       "id": 5,

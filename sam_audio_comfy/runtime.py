@@ -320,6 +320,42 @@ def import_sam_audio() -> tuple[Any, Any]:
         ) from error
 
 
+def _load_sam_audio_checkpoint(SAMAudio: Any, model_path: Path) -> Any:
+    """Load a local checkpoint across old and new huggingface_hub call signatures."""
+    model_kwargs = {
+        "map_location": "cpu",
+        "strict": False,
+        "text_ranker": None,
+        "visual_ranker": None,
+    }
+    try:
+        return SAMAudio.from_pretrained(str(model_path), **model_kwargs)
+    except TypeError as error:
+        message = str(error)
+        if not (
+            "_from_pretrained()" in message
+            and "proxies" in message
+            and "resume_download" in message
+        ):
+            raise
+
+        LOGGER.info(
+            "Using SAM-Audio's legacy local-checkpoint loader with the current "
+            "huggingface_hub API"
+        )
+        return SAMAudio._from_pretrained(
+            model_id=str(model_path),
+            revision=None,
+            cache_dir=None,
+            force_download=False,
+            proxies=None,
+            resume_download=False,
+            local_files_only=True,
+            token=None,
+            **model_kwargs,
+        )
+
+
 def load_pipeline(
     model_name: str,
     folder_paths: Any,
@@ -334,13 +370,7 @@ def load_pipeline(
 
     LOGGER.info("Loading SAM-Audio model from %s", model_path)
     try:
-        model = SAMAudio.from_pretrained(
-            str(model_path),
-            map_location="cpu",
-            strict=False,
-            text_ranker=None,
-            visual_ranker=None,
-        )
+        model = _load_sam_audio_checkpoint(SAMAudio, model_path)
         processor = SAMAudioProcessor.from_pretrained(str(model_path))
     except Exception as error:
         raise RuntimeError(

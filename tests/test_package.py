@@ -1,3 +1,4 @@
+import json
 import sys
 import types
 from pathlib import Path
@@ -36,6 +37,28 @@ def test_node_does_not_require_torchcodec():
             if line.strip() and not line.lstrip().startswith("#")
         ]
         assert not any("torchcodec" in line for line in dependency_lines)
+
+
+def test_example_sampler_widgets_include_seed_control():
+    root = Path(__file__).parents[1]
+    expected = {
+        "text_separation_workflow.json": (
+            "SAMAudioTextSeparator",
+            ["man speaking", False, 0, "fixed", 32],
+        ),
+        "span_separation_workflow.json": (
+            "SAMAudioSpanSeparator",
+            ["car honking", 0, "fixed", 32],
+        ),
+        "visual_separation_workflow.json": (
+            "SAMAudioVisualSeparator",
+            ["", 0, "fixed", 32],
+        ),
+    }
+    for filename, (node_type, widget_values) in expected.items():
+        workflow = json.loads((root / "examples" / filename).read_text())
+        sampler = next(node for node in workflow["nodes"] if node["type"] == node_type)
+        assert sampler["widgets_values"] == widget_values
 
 
 def test_upstream_installer_uses_no_deps():

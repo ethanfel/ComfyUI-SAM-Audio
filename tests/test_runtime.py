@@ -141,6 +141,44 @@ def test_mirror_checksum_mismatch_is_rejected(tmp_path, monkeypatch):
         runtime._download_official_model("facebook/sam-audio-small", tmp_path)
 
 
+def test_local_checkpoint_falls_back_for_legacy_hub_signature(tmp_path):
+    calls = []
+
+    class FakeSAMAudio:
+        @classmethod
+        def from_pretrained(cls, model_id, **kwargs):
+            calls.append(("public", model_id, kwargs))
+            raise TypeError(
+                "BaseModel._from_pretrained() missing 2 required keyword-only "
+                "arguments: 'proxies' and 'resume_download'"
+            )
+
+        @classmethod
+        def _from_pretrained(cls, **kwargs):
+            calls.append(("legacy", kwargs))
+            return "model"
+
+    assert runtime._load_sam_audio_checkpoint(FakeSAMAudio, tmp_path) == "model"
+    assert calls[1][0] == "legacy"
+    assert calls[1][1]["model_id"] == str(tmp_path)
+    assert calls[1][1]["local_files_only"] is True
+    assert calls[1][1]["proxies"] is None
+    assert calls[1][1]["resume_download"] is False
+    assert calls[1][1]["strict"] is False
+    assert calls[1][1]["text_ranker"] is None
+    assert calls[1][1]["visual_ranker"] is None
+
+
+def test_local_checkpoint_does_not_hide_unrelated_type_errors(tmp_path):
+    class FakeSAMAudio:
+        @classmethod
+        def from_pretrained(cls, model_id, **kwargs):
+            raise TypeError("bad model config")
+
+    with pytest.raises(TypeError, match="bad model config"):
+        runtime._load_sam_audio_checkpoint(FakeSAMAudio, tmp_path)
+
+
 def test_ode_options_match_upstream_default():
     assert ode_options(32) == {
         "method": "midpoint",
