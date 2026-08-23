@@ -1,5 +1,5 @@
 [project]
-name = "comfyui-sam-audio"
+name = "comfyui-meta-sam-audio"
 version = "0.2.4"
 description = "Native ComfyUI nodes for local Meta SAM-Audio sound separation"
 readme = "README.md"
@@ -28,7 +28,7 @@ test = ["pytest>=8"]
 
 [tool.comfy]
 PublisherId = "ethanfel"
-DisplayName = "SAM-Audio"
+DisplayName = "Meta SAM-Audio"
 Icon = ""
 
 [tool.pytest.ini_options]
