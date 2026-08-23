@@ -54,6 +54,10 @@ def test_example_sampler_widgets_include_seed_control():
             "SAMAudioVisualSeparator",
             ["", 0, "fixed", 32, 10.0, 1.0],
         ),
+        "video_separation_workflow.json": (
+            "SAMAudioVideoSeparator",
+            ["", 0, "fixed", 32, 10.0, 1.0],
+        ),
     }
     for filename, (node_type, widget_values) in expected.items():
         workflow = json.loads((root / "examples" / filename).read_text())

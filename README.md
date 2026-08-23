@@ -50,6 +50,7 @@ The required T5 asset is pinned in the Hugging Face cache and reused locally aft
 - **SAM-Audio Span Prompt** — creates positive or negative time spans
 - **SAM-Audio Span Separate** — separates audio using text and time spans
 - **SAM-Audio Visual Separate** — separates audio using image frames and a mask
+- **SAM-Audio Video Separate** — accepts a native ComfyUI `VIDEO`, uses its embedded audio, and separates the object selected by a mask
 
 All nodes are in `audio/SAM-Audio`.
 
@@ -69,6 +70,7 @@ Example workflows are included in the [`examples`](examples/) directory.
 - Output is mono at 48 kHz.
 - Adjacent chunks use a normalized crossfade; the defaults are 10-second chunks with 1-second overlap.
 - White pixels in a visual mask identify the target object.
+- Native `VIDEO` inputs must contain an audio track. Use ComfyUI's **Create Video** node to attach separate audio when needed.
 - Local model folders must contain `config.json` and `checkpoint.pt`.
 - The model loader offers PyTorch SDPA (default) or Comfy Kitchen INT8 attention. Comfy Kitchen requires a supported current ComfyUI build and GPU and may slightly change results because its attention is quantized.
 - ComfyUI's **Unload Models** action moves SAM-Audio out of VRAM but keeps the cached loader output in system RAM. Use **Unload Models and Execution Cache** when you also want ComfyUI to discard that cached CPU model.

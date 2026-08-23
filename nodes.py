@@ -487,12 +487,93 @@ class SAMAudioVisualSeparator:
         )
 
 
+class SAMAudioVideoSeparator:
+    DESCRIPTION = (
+        "Separates the sound associated with a white mask region from a native "
+        "ComfyUI VIDEO value, using the video's embedded audio track."
+    )
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        required = {
+            "pipeline": (PIPELINE_TYPE,),
+            "video": (
+                "VIDEO",
+                {
+                    "tooltip": "A native ComfyUI VIDEO containing frames and an embedded audio track.",
+                },
+            ),
+            "mask": (
+                "MASK",
+                {
+                    "tooltip": "White selects the visible object whose sound should be isolated. Use one mask for all frames or one per frame.",
+                },
+            ),
+            "description": (
+                "STRING",
+                {
+                    "default": "",
+                    "multiline": False,
+                    "tooltip": "Optional text guidance to combine with the visual prompt.",
+                },
+            ),
+        }
+        required.update(_sampling_inputs())
+        required.update(_chunking_inputs())
+        return {"required": required}
+
+    RETURN_TYPES = ("AUDIO", "AUDIO")
+    RETURN_NAMES = ("target", "residual")
+    FUNCTION = "separate"
+    CATEGORY = CATEGORY
+
+    def separate(
+        self,
+        pipeline: SAMAudioPipeline,
+        video: Any,
+        mask: torch.Tensor,
+        description: str,
+        seed: int,
+        inference_steps: int,
+        chunk_duration: float = 10.0,
+        chunk_overlap: float = 1.0,
+    ):
+        get_components = getattr(video, "get_components", None)
+        if not callable(get_components):
+            raise TypeError("video must be a native ComfyUI VIDEO value")
+
+        components = get_components()
+        images = getattr(components, "images", None)
+        audio = getattr(components, "audio", None)
+        if not isinstance(images, torch.Tensor) or images.shape[0] < 1:
+            raise ValueError("VIDEO input does not contain any decoded frames")
+        if audio is None:
+            raise ValueError(
+                "VIDEO input has no audio track; attach audio with ComfyUI's "
+                "Create Video node or use SAM-Audio Visual Separate with separate "
+                "IMAGE and AUDIO inputs"
+            )
+
+        visual_prompt = prepare_visual_prompt(images, mask)
+        return _run_separation(
+            pipeline,
+            audio,
+            description,
+            seed,
+            inference_steps,
+            chunk_duration,
+            chunk_overlap,
+            visual_prompt=visual_prompt,
+        )
+
+
 NODE_CLASS_MAPPINGS = {
     "SAMAudioPipelineLoader": SAMAudioPipelineLoader,
     "SAMAudioSpanPrompt": SAMAudioSpanPrompt,
     "SAMAudioTextSeparator": SAMAudioTextSeparator,
     "SAMAudioSpanSeparator": SAMAudioSpanSeparator,
     "SAMAudioVisualSeparator": SAMAudioVisualSeparator,
+    "SAMAudioVideoSeparator": SAMAudioVideoSeparator,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -501,4 +582,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SAMAudioTextSeparator": "SAM-Audio Text Separate",
     "SAMAudioSpanSeparator": "SAM-Audio Span Separate",
     "SAMAudioVisualSeparator": "SAM-Audio Visual Separate",
+    "SAMAudioVideoSeparator": "SAM-Audio Video Separate",
 }

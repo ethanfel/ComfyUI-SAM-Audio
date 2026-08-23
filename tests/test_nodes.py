@@ -4,6 +4,7 @@ import sys
 import types
 from pathlib import Path
 
+import pytest
 import torch
 
 
@@ -127,6 +128,7 @@ def test_text_node_runs_full_audio_batch_with_standard_shapes(monkeypatch, tmp_p
         "SAMAudioTextSeparator",
         "SAMAudioSpanSeparator",
         "SAMAudioVisualSeparator",
+        "SAMAudioVideoSeparator",
     }
     assert management.load_calls == [([pipeline.patcher], True)]
 
@@ -225,3 +227,64 @@ def test_visual_node_slices_frames_to_each_audio_chunk(monkeypatch, tmp_path):
 
     frame_counts = [call["masked_videos"][0].shape[0] for call in processor.calls]
     assert frame_counts == [4, 4, 2]
+
+
+def test_video_node_uses_native_comfy_video_frames_and_audio(monkeypatch, tmp_path):
+    package, _ = _load_node_package(monkeypatch, tmp_path)
+    nodes = sys.modules[f"{package.__name__}.nodes"]
+    runtime = sys.modules[f"{package.__name__}.sam_audio_comfy.runtime"]
+    processor = FakeProcessor()
+    pipeline = _fake_pipeline(runtime, processor)
+    images = torch.ones(8, 2, 2, 3)
+    audio = {"waveform": torch.ones(1, 1, 16), "sample_rate": 8}
+    video = types.SimpleNamespace(
+        get_components=lambda: types.SimpleNamespace(
+            images=images,
+            audio=audio,
+            frame_rate=8,
+        )
+    )
+
+    target, residual = nodes.SAMAudioVideoSeparator().separate(
+        pipeline=pipeline,
+        video=video,
+        mask=torch.ones(2, 2),
+        description="",
+        seed=0,
+        inference_steps=32,
+        chunk_duration=0,
+        chunk_overlap=0,
+    )
+
+    assert processor.calls[0]["audios"][0].shape == (1, 16)
+    assert processor.calls[0]["masked_videos"][0].shape == (8, 3, 2, 2)
+    assert target["waveform"].shape == (1, 1, 16)
+    assert residual["waveform"].shape == (1, 1, 16)
+    video_inputs = package.NODE_CLASS_MAPPINGS[
+        "SAMAudioVideoSeparator"
+    ].INPUT_TYPES()["required"]
+    assert video_inputs["video"][0] == "VIDEO"
+
+
+def test_video_node_requires_embedded_audio(monkeypatch, tmp_path):
+    package, _ = _load_node_package(monkeypatch, tmp_path)
+    nodes = sys.modules[f"{package.__name__}.nodes"]
+    runtime = sys.modules[f"{package.__name__}.sam_audio_comfy.runtime"]
+    pipeline = _fake_pipeline(runtime)
+    video = types.SimpleNamespace(
+        get_components=lambda: types.SimpleNamespace(
+            images=torch.ones(1, 2, 2, 3),
+            audio=None,
+            frame_rate=1,
+        )
+    )
+
+    with pytest.raises(ValueError, match="has no audio track"):
+        nodes.SAMAudioVideoSeparator().separate(
+            pipeline=pipeline,
+            video=video,
+            mask=torch.ones(2, 2),
+            description="",
+            seed=0,
+            inference_steps=32,
+        )
