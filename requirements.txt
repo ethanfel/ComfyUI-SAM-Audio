@@ -6,7 +6,6 @@ huggingface-hub
 regex
 safetensors
 timm
-torchcodec
 torchdiffeq
 tqdm
 transformers>=4.54.0

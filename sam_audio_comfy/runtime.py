@@ -13,6 +13,7 @@ import torch
 
 from .attention import validate_attention_backend
 from .audiotools_compat import audiotools_import_compatibility
+from .torchcodec_compat import torchcodec_import_compatibility
 from .xformers_compat import xformers_import_compatibility
 
 LOGGER = logging.getLogger(__name__)
@@ -305,14 +306,17 @@ def import_sam_audio() -> tuple[Any, Any]:
         LOGGER.info(
             "Loading SAM-Audio through isolated inference-only compatibility layers"
         )
-        with xformers_import_compatibility(), audiotools_import_compatibility():
+        with (
+            xformers_import_compatibility(),
+            audiotools_import_compatibility(),
+            torchcodec_import_compatibility(),
+        ):
             module = importlib.import_module("sam_audio")
         return module.SAMAudio, module.SAMAudioProcessor
     except Exception as error:
         raise RuntimeError(
             "SAM-Audio could not be imported. Install this node's requirements with "
-            "ComfyUI's Python interpreter, then restart ComfyUI. This node does not "
-            "require or install xFormers."
+            "ComfyUI's Python interpreter, then restart ComfyUI."
         ) from error
 
 

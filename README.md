@@ -27,6 +27,8 @@ python ComfyUI-SAM-Audio/install.py
 
 Then restart ComfyUI. If installed through ComfyUI Manager, the installer should run automatically.
 
+The node uses ComfyUI's decoded media tensors and does not install or load TorchCodec.
+
 ## Model download
 
 Select a model in **SAM-Audio Model Loader** and queue the workflow. The loader first tries Meta's official repository. If Hugging Face denies gated access, it automatically downloads the matching pinned and checksum-verified checkpoint from the [public mirror collection](https://huggingface.co/collections/mrfakename/sam-audio).

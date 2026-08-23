@@ -1,9 +1,15 @@
 import sys
+import types
 from pathlib import Path
 
+import pytest
 import torch
 
-from sam_audio_comfy import audiotools_compat, xformers_compat
+from sam_audio_comfy import (
+    audiotools_compat,
+    torchcodec_compat,
+    xformers_compat,
+)
 
 
 def test_node_does_not_require_xformers():
@@ -19,6 +25,17 @@ def test_node_does_not_require_xformers():
             if line.strip() and not line.lstrip().startswith("#")
         ]
         assert not any("xformers" in line for line in dependency_lines)
+
+
+def test_node_does_not_require_torchcodec():
+    root = Path(__file__).parents[1]
+    for filename in ("requirements.txt", "pyproject.toml"):
+        dependency_lines = [
+            line
+            for line in (root / filename).read_text().lower().splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+        assert not any("torchcodec" in line for line in dependency_lines)
 
 
 def test_upstream_installer_uses_no_deps():
@@ -58,3 +75,33 @@ def test_audiotools_compatibility_is_import_only_and_scoped(monkeypatch):
         assert audiotools.ml.BaseModel.INTERN == []
 
     assert "audiotools" not in sys.modules
+
+
+def test_torchcodec_compatibility_is_import_only_and_scoped(monkeypatch):
+    monkeypatch.delitem(sys.modules, "torchcodec", raising=False)
+    monkeypatch.delitem(sys.modules, "torchcodec.decoders", raising=False)
+    monkeypatch.delitem(sys.modules, "torchcodec.encoders", raising=False)
+
+    with torchcodec_compat.torchcodec_import_compatibility():
+        decoders = sys.modules["torchcodec.decoders"]
+        assert decoders.AudioDecoder is torchcodec_compat.AudioDecoder
+        assert decoders.VideoDecoder is torchcodec_compat.VideoDecoder
+        with pytest.raises(RuntimeError, match="decoded ComfyUI"):
+            decoders.AudioDecoder("input.wav")
+
+    assert "torchcodec" not in sys.modules
+    assert "torchcodec.decoders" not in sys.modules
+
+
+def test_existing_torchcodec_modules_are_restored(monkeypatch):
+    original = types.ModuleType("torchcodec")
+    original_decoders = types.ModuleType("torchcodec.decoders")
+    monkeypatch.setitem(sys.modules, "torchcodec", original)
+    monkeypatch.setitem(sys.modules, "torchcodec.decoders", original_decoders)
+
+    with torchcodec_compat.torchcodec_import_compatibility():
+        assert sys.modules["torchcodec"] is not original
+        assert sys.modules["torchcodec.decoders"] is not original_decoders
+
+    assert sys.modules["torchcodec"] is original
+    assert sys.modules["torchcodec.decoders"] is original_decoders
