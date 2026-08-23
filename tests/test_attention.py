@@ -76,6 +76,25 @@ def test_kitchen_backend_preserves_pytorch_for_causal_attention(monkeypatch):
     assert kitchen.calls == []
 
 
+def test_kitchen_backend_contiguates_the_head_dimension(monkeypatch):
+    kitchen = FakeComfyKitchen()
+    monkeypatch.setattr(attention.importlib, "import_module", lambda _: kitchen)
+    target = types.ModuleType("sam_audio.fake_transformer")
+    target.F = torch_functional
+    monkeypatch.setitem(sys.modules, target.__name__, target)
+    strided = torch.zeros(1, 2, 3, 8)[..., ::2]
+    assert strided.stride(-1) == 2
+
+    with attention.attention_backend_context("comfy_kitchen"):
+        actual = target.F.scaled_dot_product_attention(strided, strided, strided)
+
+    assert actual.shape == strided.shape
+    assert all(
+        kitchen.calls[0][name].stride(-1) == 1
+        for name in ("query", "key", "value")
+    )
+
+
 def test_kitchen_backend_validation(monkeypatch):
     kitchen = FakeComfyKitchen(available=False)
     monkeypatch.setattr(attention.importlib, "import_module", lambda _: kitchen)

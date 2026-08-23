@@ -78,6 +78,14 @@ def _kitchen_sdpa(comfy_kitchen: Any):
                 scale=scale,
                 enable_gqa=enable_gqa,
             )
+        # SAM-Audio creates Q/K/V with permute and RoPE operations that may leave
+        # the head dimension strided. Kitchen's INT8 kernel requires stride 1.
+        if query.stride(-1) != 1:
+            query = query.contiguous()
+        if key.stride(-1) != 1:
+            key = key.contiguous()
+        if value.stride(-1) != 1:
+            value = value.contiguous()
         return comfy_kitchen.int8_attention(
             query,
             key,
