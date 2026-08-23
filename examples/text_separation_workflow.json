@@ -49,7 +49,7 @@
         {"name": "residual", "type": "AUDIO", "links": [4], "slot_index": 1}
       ],
       "properties": {"Node name for S&R": "SAMAudioTextSeparator"},
-      "widgets_values": ["man speaking", false, 0, "fixed", 32]
+      "widgets_values": ["man speaking", false, 0, "fixed", 32, 10.0, 1.0]
     },
     {
       "id": 4,

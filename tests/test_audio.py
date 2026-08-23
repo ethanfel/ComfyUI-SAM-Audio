@@ -1,6 +1,51 @@
+import pytest
 import torch
 
-from sam_audio_comfy.audio import prepare_audio, prepare_visual_prompt, result_to_audio
+from sam_audio_comfy.audio import (
+    AudioChunk,
+    crossfade_audio_chunks,
+    plan_audio_chunks,
+    prepare_audio,
+    prepare_visual_prompt,
+    result_to_audio,
+    slice_visual_frames,
+)
+
+
+def test_chunk_plan_covers_audio_with_requested_overlap():
+    assert plan_audio_chunks(21, 1, 10.0, 2.0) == [
+        AudioChunk(0, 10),
+        AudioChunk(8, 18),
+        AudioChunk(16, 21),
+    ]
+    assert plan_audio_chunks(21, 1, 0.0, 2.0) == [AudioChunk(0, 21)]
+    assert plan_audio_chunks(5, 1, 10.0, 2.0) == [AudioChunk(0, 5)]
+
+    with pytest.raises(ValueError, match="shorter than chunk_duration"):
+        plan_audio_chunks(21, 1, 10.0, 10.0)
+
+
+def test_crossfade_audio_chunks_normalizes_overlap():
+    first = torch.ones(1, 1, 6)
+    second = torch.full((1, 1, 6), 3.0)
+    output = crossfade_audio_chunks(
+        [(AudioChunk(0, 6), first), (AudioChunk(4, 10), second)], 10
+    )
+
+    assert torch.equal(output[..., :4], torch.ones(1, 1, 4))
+    assert torch.allclose(output[0, 0, 4:6], torch.tensor([5 / 3, 7 / 3]))
+    assert torch.equal(output[..., 6:], torch.full((1, 1, 4), 3.0))
+
+
+def test_visual_frames_are_sliced_to_chunk_time_range():
+    frames = torch.arange(10).view(10, 1)
+
+    assert torch.equal(
+        slice_visual_frames(frames, AudioChunk(2, 6), 10), frames[2:6]
+    )
+    assert torch.equal(
+        slice_visual_frames(frames, AudioChunk(0, 10), 10), frames
+    )
 
 
 def test_prepare_audio_preserves_batch_and_resamples():

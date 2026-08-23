@@ -44,15 +44,15 @@ def test_example_sampler_widgets_include_seed_control():
     expected = {
         "text_separation_workflow.json": (
             "SAMAudioTextSeparator",
-            ["man speaking", False, 0, "fixed", 32],
+            ["man speaking", False, 0, "fixed", 32, 10.0, 1.0],
         ),
         "span_separation_workflow.json": (
             "SAMAudioSpanSeparator",
-            ["car honking", 0, "fixed", 32],
+            ["car honking", 0, "fixed", 32, 10.0, 1.0],
         ),
         "visual_separation_workflow.json": (
             "SAMAudioVisualSeparator",
-            ["", 0, "fixed", 32],
+            ["", 0, "fixed", 32, 10.0, 1.0],
         ),
     }
     for filename, (node_type, widget_values) in expected.items():

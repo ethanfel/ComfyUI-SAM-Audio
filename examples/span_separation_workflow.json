@@ -65,7 +65,7 @@
         {"name": "residual", "type": "AUDIO", "links": [5], "slot_index": 1}
       ],
       "properties": {"Node name for S&R": "SAMAudioSpanSeparator"},
-      "widgets_values": ["car honking", 0, "fixed", 32]
+      "widgets_values": ["car honking", 0, "fixed", 32, 10.0, 1.0]
     },
     {
       "id": 5,

@@ -5,14 +5,19 @@ from typing import Any
 
 import comfy.model_management as model_management
 import comfy.model_patcher as model_patcher
+import comfy.utils as comfy_utils
 import folder_paths
 import torch
 
 from .sam_audio_comfy.attention import ATTENTION_BACKENDS, attention_backend_context
 from .sam_audio_comfy.audio import (
+    AudioChunk,
+    crossfade_audio_chunks,
+    plan_audio_chunks,
     prepare_audio,
     prepare_visual_prompt,
     result_to_audio,
+    slice_visual_frames,
 )
 from .sam_audio_comfy.runtime import (
     SAMAudioPipeline,
@@ -58,6 +63,31 @@ def _sampling_inputs() -> dict[str, tuple[Any, ...]]:
     }
 
 
+def _chunking_inputs() -> dict[str, tuple[Any, ...]]:
+    return {
+        "chunk_duration": (
+            "FLOAT",
+            {
+                "default": 10.0,
+                "min": 0.0,
+                "max": 3600.0,
+                "step": 0.5,
+                "tooltip": "Seconds processed per pass. Use 0 to process the entire clip at once.",
+            },
+        ),
+        "chunk_overlap": (
+            "FLOAT",
+            {
+                "default": 1.0,
+                "min": 0.0,
+                "max": 60.0,
+                "step": 0.1,
+                "tooltip": "Seconds shared by adjacent chunks for a smooth crossfade.",
+            },
+        ),
+    }
+
+
 def _as_result_list(value: Any) -> list[torch.Tensor]:
     if isinstance(value, torch.Tensor):
         return [value] if value.ndim == 1 else list(value)
@@ -66,12 +96,30 @@ def _as_result_list(value: Any) -> list[torch.Tensor]:
     raise RuntimeError(f"SAM-Audio returned an unexpected result type: {type(value).__name__}")
 
 
+def _spans_for_chunk(
+    spans: tuple[SpanPrompt, ...], chunk: AudioChunk, sample_rate: int
+) -> tuple[SpanPrompt, ...]:
+    chunk_start = chunk.start / sample_rate
+    chunk_end = chunk.end / sample_rate
+    localized = []
+    for span in spans:
+        start = max(span.start, chunk_start)
+        end = min(span.end, chunk_end)
+        if end > start:
+            localized.append(
+                SpanPrompt(span.token, start - chunk_start, end - chunk_start)
+            )
+    return tuple(localized)
+
+
 def _run_separation(
     pipeline: SAMAudioPipeline,
     audio: dict[str, Any],
     description: str,
     seed: int,
     inference_steps: int,
+    chunk_duration: float,
+    chunk_overlap: float,
     *,
     predict_spans: bool = False,
     spans: tuple[SpanPrompt, ...] | None = None,
@@ -87,52 +135,84 @@ def _run_separation(
     waveforms, target_length = prepare_audio(
         audio, pipeline.processor.audio_sampling_rate
     )
+    sample_rate = pipeline.processor.audio_sampling_rate
     batch_size = len(waveforms)
-    duration = target_length / pipeline.processor.audio_sampling_rate
+    duration = target_length / sample_rate
+    chunks = plan_audio_chunks(
+        target_length,
+        sample_rate,
+        chunk_duration,
+        chunk_overlap,
+    )
 
-    anchors = None
     if spans is not None:
         validate_spans(spans, duration)
-        anchors = [list(spans) for _ in range(batch_size)]
 
-    masked_videos = None
+    masked_video = None
     if visual_prompt is not None:
         frames, mask = visual_prompt
-        masked = pipeline.processor.mask_videos([frames], [mask])[0]
-        masked_videos = [masked for _ in range(batch_size)]
-
-    batch = pipeline.processor(
-        audios=waveforms,
-        descriptions=[description for _ in range(batch_size)],
-        anchors=anchors,
-        masked_videos=masked_videos,
-    )
+        masked_video = pipeline.processor.mask_videos([frames], [mask])[0]
 
     pipeline.load(model_management)
-    batch = batch.to(pipeline.device)
+    target_chunks = []
+    residual_chunks = []
+    progress = comfy_utils.ProgressBar(len(chunks))
+    for chunk_index, chunk in enumerate(chunks):
+        chunk_waveforms = [
+            waveform[..., chunk.start : chunk.end] for waveform in waveforms
+        ]
 
-    with (
-        seeded_inference(seed, pipeline.device),
-        attention_backend_context(pipeline.attention_backend),
-        torch.inference_mode(),
-    ):
-        result = pipeline.model.separate(
-            batch,
-            ode_opt=sampling_options,
-            reranking_candidates=1,
-            predict_spans=predict_spans,
+        anchors = None
+        if spans is not None:
+            localized_spans = _spans_for_chunk(spans, chunk, sample_rate)
+            anchors = [list(localized_spans) for _ in range(batch_size)]
+
+        masked_videos = None
+        if masked_video is not None:
+            chunk_video = slice_visual_frames(masked_video, chunk, target_length)
+            masked_videos = [chunk_video for _ in range(batch_size)]
+
+        batch = pipeline.processor(
+            audios=chunk_waveforms,
+            descriptions=[description for _ in range(batch_size)],
+            anchors=anchors,
+            masked_videos=masked_videos,
         )
+        batch = batch.to(pipeline.device)
 
-    target = result_to_audio(
-        _as_result_list(result.target),
-        pipeline.processor.audio_sampling_rate,
-        target_length,
-    )
-    residual = result_to_audio(
-        _as_result_list(result.residual),
-        pipeline.processor.audio_sampling_rate,
-        target_length,
-    )
+        chunk_seed = (seed + chunk_index) % (2**64)
+        with (
+            seeded_inference(chunk_seed, pipeline.device),
+            attention_backend_context(pipeline.attention_backend),
+            torch.inference_mode(),
+        ):
+            result = pipeline.model.separate(
+                batch,
+                ode_opt=sampling_options,
+                reranking_candidates=1,
+                predict_spans=predict_spans,
+            )
+
+        target = result_to_audio(
+            _as_result_list(result.target), sample_rate, chunk.length
+        )
+        residual = result_to_audio(
+            _as_result_list(result.residual), sample_rate, chunk.length
+        )
+        target_chunks.append((chunk, target["waveform"]))
+        residual_chunks.append((chunk, residual["waveform"]))
+        progress.update(1)
+
+    target = {
+        "waveform": crossfade_audio_chunks(target_chunks, target_length).contiguous(),
+        "sample_rate": sample_rate,
+    }
+    residual = {
+        "waveform": crossfade_audio_chunks(
+            residual_chunks, target_length
+        ).contiguous(),
+        "sample_rate": sample_rate,
+    }
     return target, residual
 
 
@@ -262,6 +342,7 @@ class SAMAudioTextSeparator:
             ),
         }
         required.update(_sampling_inputs())
+        required.update(_chunking_inputs())
         return {"required": required}
 
     RETURN_TYPES = ("AUDIO", "AUDIO")
@@ -277,6 +358,8 @@ class SAMAudioTextSeparator:
         predict_spans: bool,
         seed: int,
         inference_steps: int,
+        chunk_duration: float = 10.0,
+        chunk_overlap: float = 1.0,
     ):
         return _run_separation(
             pipeline,
@@ -284,6 +367,8 @@ class SAMAudioTextSeparator:
             description,
             seed,
             inference_steps,
+            chunk_duration,
+            chunk_overlap,
             predict_spans=predict_spans,
         )
 
@@ -306,6 +391,7 @@ class SAMAudioSpanSeparator:
             "spans": (SPANS_TYPE,),
         }
         required.update(_sampling_inputs())
+        required.update(_chunking_inputs())
         return {"required": required}
 
     RETURN_TYPES = ("AUDIO", "AUDIO")
@@ -321,6 +407,8 @@ class SAMAudioSpanSeparator:
         spans: tuple[SpanPrompt, ...],
         seed: int,
         inference_steps: int,
+        chunk_duration: float = 10.0,
+        chunk_overlap: float = 1.0,
     ):
         return _run_separation(
             pipeline,
@@ -328,6 +416,8 @@ class SAMAudioSpanSeparator:
             description,
             seed,
             inference_steps,
+            chunk_duration,
+            chunk_overlap,
             spans=tuple(spans),
         )
 
@@ -361,6 +451,7 @@ class SAMAudioVisualSeparator:
             ),
         }
         required.update(_sampling_inputs())
+        required.update(_chunking_inputs())
         return {"required": required}
 
     RETURN_TYPES = ("AUDIO", "AUDIO")
@@ -377,6 +468,8 @@ class SAMAudioVisualSeparator:
         description: str,
         seed: int,
         inference_steps: int,
+        chunk_duration: float = 10.0,
+        chunk_overlap: float = 1.0,
     ):
         visual_prompt = prepare_visual_prompt(images, mask)
         return _run_separation(
@@ -385,6 +478,8 @@ class SAMAudioVisualSeparator:
             description,
             seed,
             inference_steps,
+            chunk_duration,
+            chunk_overlap,
             visual_prompt=visual_prompt,
         )
 

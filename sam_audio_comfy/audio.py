@@ -1,10 +1,120 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 
 import torch
 import torch.nn.functional as F
 import torchaudio
+
+
+@dataclass(frozen=True)
+class AudioChunk:
+    start: int
+    end: int
+
+    @property
+    def length(self) -> int:
+        return self.end - self.start
+
+
+def plan_audio_chunks(
+    total_samples: int,
+    sample_rate: int,
+    chunk_duration: float,
+    chunk_overlap: float,
+) -> list[AudioChunk]:
+    """Plan overlapping sample ranges; zero duration keeps the original full pass."""
+    if total_samples < 1:
+        raise ValueError("total_samples must be positive")
+    if sample_rate < 1:
+        raise ValueError("sample_rate must be positive")
+    if chunk_duration < 0:
+        raise ValueError("chunk_duration cannot be negative")
+    if chunk_overlap < 0:
+        raise ValueError("chunk_overlap cannot be negative")
+    if chunk_duration == 0:
+        return [AudioChunk(0, total_samples)]
+
+    chunk_samples = round(chunk_duration * sample_rate)
+    overlap_samples = round(chunk_overlap * sample_rate)
+    if chunk_samples < 1:
+        raise ValueError("chunk_duration is shorter than one audio sample")
+    if overlap_samples >= chunk_samples:
+        raise ValueError("chunk_overlap must be shorter than chunk_duration")
+    if total_samples <= chunk_samples:
+        return [AudioChunk(0, total_samples)]
+
+    hop_samples = chunk_samples - overlap_samples
+    chunks = []
+    start = 0
+    while True:
+        end = min(start + chunk_samples, total_samples)
+        chunks.append(AudioChunk(start, end))
+        if end == total_samples:
+            return chunks
+        start += hop_samples
+
+
+def crossfade_audio_chunks(
+    chunks: Sequence[tuple[AudioChunk, torch.Tensor]], total_samples: int
+) -> torch.Tensor:
+    """Reassemble [batch, channels, samples] chunks with normalized linear fades."""
+    if not chunks:
+        raise ValueError("chunks cannot be empty")
+
+    first = chunks[0][1]
+    if first.ndim != 3:
+        raise ValueError("chunk waveforms must have [batch, channels, samples] shape")
+    output = first.new_zeros((*first.shape[:-1], total_samples))
+    weights = first.new_zeros(total_samples)
+
+    for index, (chunk, waveform) in enumerate(chunks):
+        if waveform.ndim != 3 or waveform.shape[:-1] != first.shape[:-1]:
+            raise ValueError("all chunk waveforms must have matching batch and channels")
+        if waveform.shape[-1] != chunk.length:
+            raise ValueError("chunk waveform length does not match its sample range")
+
+        window = waveform.new_ones(chunk.length)
+        if index > 0:
+            fade_in = max(0, chunks[index - 1][0].end - chunk.start)
+            if fade_in:
+                window[:fade_in] *= torch.linspace(
+                    0, 1, fade_in + 2, dtype=window.dtype, device=window.device
+                )[1:-1]
+        if index + 1 < len(chunks):
+            fade_out = max(0, chunk.end - chunks[index + 1][0].start)
+            if fade_out:
+                window[-fade_out:] *= torch.linspace(
+                    1, 0, fade_out + 2, dtype=window.dtype, device=window.device
+                )[1:-1]
+
+        output[..., chunk.start : chunk.end] += waveform * window
+        weights[chunk.start : chunk.end] += window
+
+    if torch.any(weights == 0):
+        raise RuntimeError("chunk plan left uncovered audio samples")
+    return output / weights
+
+
+def slice_visual_frames(
+    frames: torch.Tensor, chunk: AudioChunk, total_samples: int
+) -> torch.Tensor:
+    """Select frames whose uniformly spaced time range intersects an audio chunk."""
+    if frames.ndim < 1 or frames.shape[0] < 1:
+        raise ValueError("frames must contain at least one frame")
+    if total_samples < 1:
+        raise ValueError("total_samples must be positive")
+    if frames.shape[0] == 1 or chunk == AudioChunk(0, total_samples):
+        return frames
+
+    frame_count = frames.shape[0]
+    start = math.floor(chunk.start * frame_count / total_samples)
+    end = math.ceil(chunk.end * frame_count / total_samples)
+    start = min(start, frame_count - 1)
+    end = min(max(start + 1, end), frame_count)
+    return frames[start:end]
 
 
 def _float_waveform(waveform: torch.Tensor) -> torch.Tensor:

@@ -58,11 +58,14 @@ All nodes are in `audio/SAM-Audio`.
 3. Connect both to a separator and enter a short prompt such as `man speaking` or `dog barking`.
 4. Preview or save the `target` and `residual` outputs.
 
+Long audio is processed in overlapping chunks by default. Set `chunk_duration` to `0` for a single full-clip pass.
+
 Example workflows are included in the [`examples`](examples/) directory.
 
 ## Notes
 
 - Output is mono at 48 kHz.
+- Adjacent chunks use a normalized crossfade; the defaults are 10-second chunks with 1-second overlap.
 - White pixels in a visual mask identify the target object.
 - Local model folders must contain `config.json` and `checkpoint.pt`.
 - The model loader offers PyTorch SDPA (default) or Comfy Kitchen INT8 attention. Comfy Kitchen requires a supported current ComfyUI build and GPU and may slightly change results because its attention is quantized.
