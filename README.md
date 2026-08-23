@@ -41,6 +41,8 @@ hf auth login
 
 Models download on first use to `ComfyUI/models/sam_audio/`. Both official and mirrored checkpoints remain subject to Meta's SAM License.
 
+The required T5 and PE span-predictor assets are pinned in the Hugging Face cache and reused locally after their first download.
+
 ## Nodes
 
 - **SAM-Audio Model Loader** — loads an official or local checkpoint

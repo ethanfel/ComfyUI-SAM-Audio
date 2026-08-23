@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import importlib
+import json
 import logging
 import os
 from dataclasses import dataclass
@@ -38,6 +39,13 @@ class MirrorSpec:
     revision: str
     checkpoint_size: int
     checkpoint_sha256: str
+
+
+@dataclass(frozen=True)
+class SupportModelSpec:
+    repo_id: str
+    revision: str
+    allow_patterns: tuple[str, ...] | None = None
 
 
 # Each mirror revision is immutable, includes Meta's SAM License, and was checked
@@ -78,6 +86,20 @@ MIRROR_MODELS = {
         "30eea7c915f43349f3b3f5c7e33e8658a01d7253",
         14_861_356_211,
         "90e047269238c498c5abe0da6e6ba40859d152111d4a09f582a209027a33b72f",
+    ),
+}
+
+# SAM-Audio constructs these support models while loading. Resolve immutable
+# snapshots once, then pass local paths upstream to prevent repeated Hub checks.
+SUPPORT_MODELS = {
+    "t5-base": SupportModelSpec(
+        "t5-base",
+        "a9723ea7f1b39c1eae772870f3b547bf6ef7e6c1",
+        ("config.json", "model.safetensors", "spiece.model", "tokenizer.json"),
+    ),
+    "pe-a-frame-large": SupportModelSpec(
+        "facebook/pe-a-frame-large",
+        "40187271298f84e2966d4518c88dde698540c9ad",
     ),
 }
 
@@ -320,14 +342,63 @@ def import_sam_audio() -> tuple[Any, Any]:
         ) from error
 
 
-def _load_sam_audio_checkpoint(SAMAudio: Any, model_path: Path) -> Any:
-    """Load a local checkpoint across old and new huggingface_hub call signatures."""
-    model_kwargs = {
+def _cached_support_snapshot(spec: SupportModelSpec) -> str:
+    try:
+        huggingface_hub = importlib.import_module("huggingface_hub")
+    except Exception as error:
+        raise RuntimeError(
+            "huggingface-hub is required to resolve SAM-Audio support models"
+        ) from error
+
+    options: dict[str, Any] = {
+        "repo_id": spec.repo_id,
+        "revision": spec.revision,
+    }
+    if spec.allow_patterns is not None:
+        options["allow_patterns"] = list(spec.allow_patterns)
+
+    try:
+        return huggingface_hub.snapshot_download(
+            **options,
+            local_files_only=True,
+        )
+    except Exception:
+        LOGGER.info(
+            "Downloading one-time SAM-Audio support model %s at %s",
+            spec.repo_id,
+            spec.revision,
+        )
+        return huggingface_hub.snapshot_download(**options)
+
+
+def _sam_audio_model_kwargs(model_path: Path) -> dict[str, Any]:
+    model_kwargs: dict[str, Any] = {
         "map_location": "cpu",
         "strict": False,
         "text_ranker": None,
         "visual_ranker": None,
     }
+    config_path = model_path / "config.json"
+    if not config_path.is_file():
+        return model_kwargs
+
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    text_encoder = config.get("text_encoder")
+    if isinstance(text_encoder, dict) and text_encoder.get("name") == "t5-base":
+        text_encoder = dict(text_encoder)
+        text_encoder["name"] = _cached_support_snapshot(SUPPORT_MODELS["t5-base"])
+        model_kwargs["text_encoder"] = text_encoder
+
+    if config.get("span_predictor") == "pe-a-frame-large":
+        model_kwargs["span_predictor"] = _cached_support_snapshot(
+            SUPPORT_MODELS["pe-a-frame-large"]
+        )
+    return model_kwargs
+
+
+def _load_sam_audio_checkpoint(SAMAudio: Any, model_path: Path) -> Any:
+    """Load a local checkpoint across old and new huggingface_hub call signatures."""
+    model_kwargs = _sam_audio_model_kwargs(model_path)
     try:
         return SAMAudio.from_pretrained(str(model_path), **model_kwargs)
     except TypeError as error:

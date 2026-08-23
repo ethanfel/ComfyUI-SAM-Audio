@@ -169,6 +169,69 @@ def test_local_checkpoint_falls_back_for_legacy_hub_signature(tmp_path):
     assert calls[1][1]["visual_ranker"] is None
 
 
+def test_support_snapshot_uses_local_cache_without_network(monkeypatch):
+    calls = []
+
+    class FakeHub:
+        @staticmethod
+        def snapshot_download(**kwargs):
+            calls.append(kwargs)
+            return "/cached/support-model"
+
+    monkeypatch.setattr(runtime.importlib, "import_module", lambda _: FakeHub)
+    spec = runtime.SupportModelSpec("owner/model", "pinned", ("config.json",))
+
+    assert runtime._cached_support_snapshot(spec) == "/cached/support-model"
+    assert calls == [
+        {
+            "repo_id": "owner/model",
+            "revision": "pinned",
+            "allow_patterns": ["config.json"],
+            "local_files_only": True,
+        }
+    ]
+
+
+def test_support_snapshot_downloads_only_when_cache_is_absent(monkeypatch):
+    calls = []
+
+    class FakeHub:
+        @staticmethod
+        def snapshot_download(**kwargs):
+            calls.append(kwargs)
+            if kwargs.get("local_files_only"):
+                raise FileNotFoundError("not cached")
+            return "/downloaded/support-model"
+
+    monkeypatch.setattr(runtime.importlib, "import_module", lambda _: FakeHub)
+    spec = runtime.SupportModelSpec("owner/model", "pinned")
+
+    assert runtime._cached_support_snapshot(spec) == "/downloaded/support-model"
+    assert [call.get("local_files_only", False) for call in calls] == [True, False]
+
+
+def test_model_kwargs_replace_support_ids_with_local_snapshots(tmp_path, monkeypatch):
+    (tmp_path / "config.json").write_text(
+        '{"text_encoder":{"name":"t5-base","dim":768},'
+        '"span_predictor":"pe-a-frame-large"}'
+    )
+    monkeypatch.setattr(
+        runtime,
+        "_cached_support_snapshot",
+        lambda spec: f"/cache/{spec.repo_id.replace('/', '--')}",
+    )
+
+    kwargs = runtime._sam_audio_model_kwargs(tmp_path)
+
+    assert kwargs["text_encoder"] == {
+        "name": "/cache/t5-base",
+        "dim": 768,
+    }
+    assert kwargs["span_predictor"] == "/cache/facebook--pe-a-frame-large"
+    assert kwargs["text_ranker"] is None
+    assert kwargs["visual_ranker"] is None
+
+
 def test_local_checkpoint_does_not_hide_unrelated_type_errors(tmp_path):
     class FakeSAMAudio:
         @classmethod
